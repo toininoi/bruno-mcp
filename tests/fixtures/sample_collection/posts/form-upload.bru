@@ -1,0 +1,18 @@
+meta {
+  name: Upload File
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/upload
+}
+
+headers {
+  Authorization: Bearer {{authToken}}
+}
+
+body:multipart-form {
+  file: @file(./photo.jpg)
+  description: Profile photo
+}

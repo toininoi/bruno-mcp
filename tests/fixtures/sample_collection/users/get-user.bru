@@ -1,0 +1,19 @@
+meta {
+  name: Get User
+  type: http
+  seq: 1
+}
+
+get {
+  url: https://api.example.com/users/{{userId}}
+}
+
+params:query {
+  include: profile,posts
+  limit: 10
+}
+
+headers {
+  Authorization: Bearer {{authToken}}
+  Accept: application/json
+}

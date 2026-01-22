@@ -1,0 +1,13 @@
+meta {
+  name: Delete User
+  type: http
+  seq: 6
+}
+
+delete {
+  url: https://api.example.com/users/{{userId}}
+}
+
+headers {
+  Authorization: Bearer {{authToken}}
+}

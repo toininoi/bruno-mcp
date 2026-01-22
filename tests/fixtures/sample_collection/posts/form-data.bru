@@ -1,0 +1,19 @@
+meta {
+  name: Submit Form
+  type: http
+  seq: 8
+}
+
+post {
+  url: https://api.example.com/form
+}
+
+headers {
+  Content-Type: application/x-www-form-urlencoded
+}
+
+body:form-urlencoded {
+  username: testuser
+  password: testpass123
+  remember: true
+}

@@ -1,0 +1,23 @@
+meta {
+  name: Create Post
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/posts
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+  X-API-Version: v1
+}
+
+body:json {
+  {
+    "title": "My Post",
+    "content": "Post content here",
+    "published": true
+  }
+}
