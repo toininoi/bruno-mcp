@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Optional
 
 from bruno_mcp.models import BruRequest, BruParseError
+from bruno_mcp.parsers.base_parser import BaseParser
 
 
-class BruParser:
+class BruParser(BaseParser):
     """Parser for Bruno .bru files.
 
     This parser uses a line-by-line state machine approach to parse the
@@ -17,52 +18,6 @@ class BruParser:
     """
 
     HTTP_METHODS = {"get", "post", "put", "delete", "patch", "head", "options"}
-
-    def _split_into_sections(self, content: str) -> dict[str, list[str]]:
-        """Split file content into named sections.
-
-        Args:
-            content: Raw file content as string.
-
-        Returns:
-            Dictionary mapping section names to their content lines.
-
-        Raises:
-            BruParseError: If braces are unmatched.
-        """
-        sections = {}
-        lines = content.split('\n')
-        current_section = None
-        current_lines = []
-        brace_count = 0
-
-        for line_num, line in enumerate(lines, 1):
-            stripped = line.strip()
-
-            if stripped.endswith('{') and not current_section:
-                section_name = stripped[:-1].strip()
-                if section_name:
-                    current_section = section_name
-                    brace_count = 1
-                    current_lines = []
-                    continue
-
-            if current_section:
-                if stripped == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        sections[current_section] = current_lines
-                        current_section = None
-                        current_lines = []
-                        continue
-
-                if stripped:
-                    current_lines.append(line.strip())
-
-        if brace_count != 0:
-            raise BruParseError("Unmatched braces in file")
-
-        return sections
 
     def _parse_meta(self, lines: list[str]) -> dict:
         """Parse meta section into dictionary.

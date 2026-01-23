@@ -1,5 +1,9 @@
 {
   "version": "1",
   "name": "Sample API Collection",
-  "type": "collection"
+  "type": "collection",
+  "vars": {
+    "defaultTimeout": "5000",
+    "baseUrl": "https://api.example.com"
+  }
 }
