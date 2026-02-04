@@ -6,7 +6,7 @@ import subprocess
 
 from bruno_mcp.executors import CLIExecutor
 from bruno_mcp.models import RequestMetadata
-from bruno_mcp.parsers import BruParser
+from bruno_mcp.parsers import BruParser, EnvParser
 from bruno_mcp.scanners import CollectionScanner
 from fastmcp import FastMCP
 
@@ -25,6 +25,7 @@ class MCPServer:
         executor: CLIExecutor,
         collection_metadata: list[RequestMetadata],
         mcp: FastMCP,
+        env_parser: EnvParser,
     ):
         """Initialize MCP server with dependencies.
 
@@ -33,11 +34,13 @@ class MCPServer:
             executor: CLI executor for HTTP requests.
             collection_metadata: Pre-scanned list of request metadata.
             mcp: FastMCP instance for MCP protocol handling.
+            env_parser: Parser for environment files.
         """
         self._collection_path = collection_path
         self._executor = executor
         self._collection_metadata = collection_metadata
         self._mcp = mcp
+        self._env_parser = env_parser
         self._register_resources()
         self._register_tools()
 
@@ -99,25 +102,23 @@ class MCPServer:
             executor=CLIExecutor(),
             collection_metadata=collection_metadata,
             mcp=FastMCP("bruno-mcp"),
+            env_parser=EnvParser(),
         )
 
     def _register_resources(self):
-        """Register MCP resources with the FastMCP instance.
-
-        Registers the collection_tree resource that provides metadata
-        for all requests in the Bruno collection.
-        """
+        """Register MCP resources with the FastMCP instance."""
 
         @self._mcp.resource("bruno://collection")
         def collection_tree():
             return [request.model_dump() for request in self._collection_metadata]
 
-    def _register_tools(self):
-        """Register MCP tools with the FastMCP instance.
+        @self._mcp.resource("bruno://environments")
+        def environments():
+            environments = self._env_parser.list_environments(self._collection_path)
+            return [env.model_dump() for env in environments]
 
-        Registers tools for listing available requests and executing
-        them by ID.
-        """
+    def _register_tools(self):
+        """Register MCP tools with the FastMCP instance."""
 
         @self._mcp.tool()
         def run_request_by_id(
@@ -168,3 +169,17 @@ class MCPServer:
                     - file_path: Relative path to the .bru file
             """
             return [request.model_dump() for request in self._collection_metadata]
+
+        @self._mcp.tool()
+        def list_environments():
+            """List all available environments in the collection.
+
+            Scans the collection's environments directory for .bru files
+            and returns a list of environment dictionaries with name and variables.
+
+            Returns:
+                List of dictionaries with "name" (str) and "variables" (dict[str, str]) keys.
+                Returns empty list if no environments found.
+            """
+            environments = self._env_parser.list_environments(self._collection_path)
+            return [env.model_dump() for env in environments]

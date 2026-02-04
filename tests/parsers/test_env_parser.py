@@ -1,24 +1,8 @@
 """Tests for environment parser - parses bruno.json and environment .bru files."""
 
+import pytest
 
 from bruno_mcp.parsers import EnvParser
-
-
-class TestCollectionParsing:
-    """Test parsing bruno.json collection files."""
-
-    def test_parse_collection_file(self, sample_collection_dir):
-        """Test parsing bruno.json with metadata and variables."""
-        parser = EnvParser()
-        bruno_json_path = sample_collection_dir / "bruno.json"
-
-        collection = parser.parse_collection(str(bruno_json_path))
-
-        assert collection["name"] == "Sample API Collection"
-        assert collection["version"] == "1"
-        assert collection["type"] == "collection"
-        assert collection["vars"]["defaultTimeout"] == "5000"
-        assert collection["vars"]["baseUrl"] == "https://api.example.com"
 
 
 class TestEnvironmentParsing:
@@ -48,37 +32,49 @@ class TestEnvironmentParsing:
     def test_parse_environment_with_nested_vars(self, sample_collection_dir):
         """Test parsing environment with nested variable references."""
         parser = EnvParser()
+
         env_path = sample_collection_dir / "environments" / "local.bru"
 
         environment = parser.parse_environment(str(env_path))
-
         assert "vars" in environment
         assert isinstance(environment["vars"], dict)
 
 
-class TestCombinedLoading:
-    """Test loading both collection and environment together."""
+class TestEnvironmentDiscovery:
+    """Test discovering and listing environments in a collection."""
 
-    def test_load_both_collection_and_environment(self, sample_collection_dir):
-        """Test loading bruno.json and environment .bru together."""
+    @pytest.fixture
+    def empty_collection_dir(self, tmp_path):
+        """Collection directory without environments directory."""
+        return tmp_path
+
+    def test_list_environments_returns_all_environment_files(self, sample_collection_dir):
+        """Test all .bru files discovered and parsed with name and variables."""
         parser = EnvParser()
+        environments = parser.list_environments(sample_collection_dir)
+        
+        assert len(environments) == 2
+        local_env = next(e for e in environments if e.name == "local")
+        prod_env = next(e for e in environments if e.name == "production")
+        assert local_env.variables["baseUrl"] == "http://localhost:3000"
+        assert local_env.variables["apiVersion"] == "v1"
+        assert prod_env.variables["baseUrl"] == "https://api.example.com"
+        assert prod_env.variables["apiKey"] == "{{process.env.API_KEY}}"
 
-        variables = parser.load_environment(
-            collection_path=str(sample_collection_dir / "bruno.json"),
-            environment_path=str(sample_collection_dir / "environments" / "local.bru"),
-        )
-
-        assert "defaultTimeout" in variables
-        assert "baseUrl" in variables
-        assert "userId" in variables
-
-    def test_environment_overrides_collection(self, sample_collection_dir):
-        """Test that environment variables override collection variables."""
+    def test_list_environments_handles_missing_environments_directory(self, empty_collection_dir):
+        """Test empty list returned when directory doesn't exist."""
         parser = EnvParser()
+        environments = parser.list_environments(empty_collection_dir)
 
-        variables = parser.load_environment(
-            collection_path=str(sample_collection_dir / "bruno.json"),
-            environment_path=str(sample_collection_dir / "environments" / "local.bru"),
-        )
+        assert environments == []
 
-        assert variables["baseUrl"] == "http://localhost:3000"
+    def test_list_environments_includes_secrets_as_template_strings(self, sample_collection_dir):
+        """Test secrets included in variables dict as template strings."""
+        parser = EnvParser()
+        environments = parser.list_environments(sample_collection_dir)
+        
+        local_env = next(e for e in environments if e.name == "local")
+        assert local_env.variables["authToken"] == "{{process.env.SECRET_TOKEN}}"
+        assert local_env.variables["baseUrl"] == "http://localhost:3000"
+        assert local_env.variables["apiVersion"] == "v1"
+        assert local_env.variables["userId"] == "123"

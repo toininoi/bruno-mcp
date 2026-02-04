@@ -1,11 +1,12 @@
 """Environment parser for Bruno collection and environment files."""
 
-import json
+import logging
 from pathlib import Path
-from typing import Optional
 
-from bruno_mcp.models import BruParseError
+from bruno_mcp.models import BruEnvironment, BruParseError
 from bruno_mcp.parsers.base_parser import BaseParser
+
+logger = logging.getLogger(__name__)
 
 
 class EnvParser(BaseParser):
@@ -19,30 +20,6 @@ class EnvParser(BaseParser):
                 key, value = line.split(":", 1)
                 result[key.strip()] = value.strip()
         return result
-
-    def parse_collection(self, filepath: str) -> dict:
-        """Parse bruno.json collection file.
-
-        Args:
-            filepath: Path to bruno.json file.
-
-        Returns:
-            Dictionary with collection metadata and variables.
-
-        Raises:
-            FileNotFoundError: If the file doesn't exist.
-            BruParseError: If the file is malformed.
-        """
-        path = Path(filepath)
-        if not path.exists():
-            raise FileNotFoundError(f"Collection file not found: {filepath}")
-
-        try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data
-        except json.JSONDecodeError as e:
-            raise BruParseError(f"Invalid JSON in collection file: {e}")
 
     def parse_environment(self, filepath: str) -> dict:
         """Parse environment .bru file.
@@ -79,32 +56,35 @@ class EnvParser(BaseParser):
 
         return result
 
-    def load_environment(
-        self, collection_path: Optional[str] = None, environment_path: Optional[str] = None
-    ) -> dict:
-        """Load and merge variables from collection and environment files.
+    def list_environments(self, collection_path: Path) -> list[BruEnvironment]:
+        """List all environments in a collection.
 
-        Environment variables override collection variables.
+        Scans collection_path / "environments" for *.bru files, parses each one,
+        and returns a list of environment models with name and variables.
 
         Args:
-            collection_path: Path to bruno.json file.
-            environment_path: Path to environment .bru file.
+            collection_path: Path to the Bruno collection directory.
 
         Returns:
-            Merged dictionary of all variables.
+            List of BruEnvironment instances with name and variables.
+            Returns empty list if environments directory doesn't exist.
         """
-        variables = {}
+        env_dir = collection_path / "environments"
+        if not env_dir.exists():
+            return []
 
-        if collection_path:
-            collection = self.parse_collection(collection_path)
-            if "vars" in collection:
-                variables.update(collection["vars"])
+        environments = []
+        for env_file in env_dir.glob("*.bru"):
+            try:
+                parsed = self.parse_environment(str(env_file))
+                variables = {}
+                if "vars" in parsed:
+                    variables.update(parsed["vars"])
+                if "secrets" in parsed:
+                    variables.update(parsed["secrets"])
+                environments.append(BruEnvironment(name=env_file.stem, variables=variables))
+            except BruParseError as e:
+                logger.warning(f"Skipping malformed environment file {env_file}: {e}")
+                continue
 
-        if environment_path:
-            environment = self.parse_environment(environment_path)
-            if "vars" in environment:
-                variables.update(environment["vars"])
-            if "secrets" in environment:
-                variables.update(environment["secrets"])
-
-        return variables
+        return environments
