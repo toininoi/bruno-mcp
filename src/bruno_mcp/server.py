@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from pathlib import Path
 import os
+import subprocess
 
-from bruno_mcp.executors import RequestExecutor
-from bruno_mcp.parsers import BruParser, EnvParser
-from bruno_mcp.resolvers import VariableResolver
+from bruno_mcp.executors import CLIExecutor
+from bruno_mcp.models import RequestMetadata
+from bruno_mcp.parsers import BruParser
 from bruno_mcp.scanners import CollectionScanner
 from fastmcp import FastMCP
 
@@ -19,32 +22,22 @@ class MCPServer:
     def __init__(
         self,
         collection_path: Path,
-        bru_parser: BruParser,
-        env_parser: EnvParser,
-        executor: RequestExecutor,
-        resolver_cls: type[VariableResolver],
-        scanner: CollectionScanner,
+        executor: CLIExecutor,
+        collection_metadata: list[RequestMetadata],
         mcp: FastMCP,
     ):
         """Initialize MCP server with dependencies.
 
         Args:
             collection_path: Path to Bruno collection directory.
-            bru_parser: Parser for .bru request files.
-            env_parser: Parser for environment and collection variables.
-            executor: Executor for HTTP requests.
-            resolver_cls: Variable resolver class for resolving {{variables}}.
-            scanner: Scanner for discovering .bru files in collection.
+            executor: CLI executor for HTTP requests.
+            collection_metadata: Pre-scanned list of request metadata.
             mcp: FastMCP instance for MCP protocol handling.
         """
         self._collection_path = collection_path
-        self._bru_parser = bru_parser
-        self._env_parser = env_parser
-        self._scanner = scanner
         self._executor = executor
-        self._resolver_cls = resolver_cls
+        self._collection_metadata = collection_metadata
         self._mcp = mcp
-        self._collection_metadata = self._scanner.scan_collection(self._collection_path)
         self._register_resources()
         self._register_tools()
 
@@ -53,30 +46,58 @@ class MCPServer:
         """FastMCP instance for running the server."""
         return self._mcp
 
+    @staticmethod
+    def _validate_cli() -> None:
+        """Validate that Bruno CLI is available.
+
+        Raises:
+            RuntimeError: If CLI validation fails or CLI is not found.
+        """
+        try:
+            result = subprocess.run(
+                ["bru", "--version"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    "Bruno CLI validation failed. Please ensure 'bru' is installed and available in PATH."
+                )
+        except FileNotFoundError:
+            raise RuntimeError(
+                "Bruno CLI not found. Please install Bruno CLI and ensure 'bru' is available in PATH."
+            )
+
     @classmethod
     def create(cls) -> "MCPServer":
         """Create MCPServer instance from environment configuration.
 
-        Reads BRUNO_COLLECTION_PATH from environment and initializes
-        all dependencies with default implementations.
+        Reads BRUNO_COLLECTION_PATH from environment, scans collection,
+        validates CLI availability, and initializes server with CLIExecutor.
 
         Returns:
             Configured MCPServer instance.
 
         Raises:
             ValueError: If BRUNO_COLLECTION_PATH environment variable is not set.
+            RuntimeError: If Bruno CLI is not available.
         """
         collection_path = os.environ.get("BRUNO_COLLECTION_PATH")
         if not collection_path:
             raise ValueError("BRUNO_COLLECTION_PATH not set")
+
+        cls._validate_cli()
+
+        abs_collection_path = Path(collection_path).resolve()
         bru_parser = BruParser()
+        scanner = CollectionScanner(bru_parser)
+        collection_metadata = scanner.scan_collection(abs_collection_path)
+
         return cls(
-            collection_path=Path(collection_path),
-            bru_parser=bru_parser,
-            env_parser=EnvParser(),
-            executor=RequestExecutor(),
-            resolver_cls=VariableResolver,
-            scanner=CollectionScanner(bru_parser),
+            collection_path=abs_collection_path,
+            executor=CLIExecutor(),
+            collection_metadata=collection_metadata,
             mcp=FastMCP("bruno-mcp"),
         )
 
@@ -102,17 +123,14 @@ class MCPServer:
         def run_request_by_id(
             request_id: str,
             environment_name: str | None = None,
-            path_params: dict[str, str] | None = None,
+            variable_overrides: dict[str, str] | None = None,
         ):
             """Execute a Bruno request by ID.
 
             Args:
                 request_id: Identifier of the request to execute.
                 environment_name: Optional environment name to load variables from.
-                path_params: Optional dictionary of URL path parameters to substitute.
-                           These override environment variables with the same name.
-                           Example: {"userId": "123", "groupId": "456"} for URLs like
-                           "/users/{{userId}}" or "/{{groupId}}/users/{{userId}}".
+                variable_overrides: Optional dictionary of variable overrides.
 
             Returns:
                 Dictionary containing the HTTP response (status, headers, body).
@@ -120,33 +138,17 @@ class MCPServer:
             Raises:
                 ValueError: If request_id is not found in the collection.
             """
-            # Load the request
             metadata = next((m for m in self._collection_metadata if m.id == request_id), None)
             if not metadata:
                 raise ValueError(f"Request not found: {request_id}")
 
-            # Load the variables
-            env_path = (
-                str(self._collection_path / "environments" / f"{environment_name}.bru")
-                if environment_name
-                else None
+            request_file_path = Path(metadata.file_path)
+            response = self._executor.execute(
+                request_file_path,
+                self._collection_path,
+                environment_name,
+                variable_overrides,
             )
-            variables = self._env_parser.load_environment(
-                collection_path=str(self._collection_path / "bruno.json"), environment_path=env_path
-            )
-
-            # Merge variables: env vars first, then user path_params override
-            merged_variables = {**variables}
-            if path_params:
-                merged_variables.update(path_params)
-
-            # Construct full path and parse
-            full_path = self._collection_path / metadata.file_path
-            request = self._bru_parser.parse_file(str(full_path))
-
-            # Execute the request
-            response = self._executor.execute(request, self._resolver_cls(merged_variables))
-            # Return the response
             return response.model_dump()
 
         @self._mcp.tool()
